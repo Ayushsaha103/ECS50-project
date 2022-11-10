@@ -1,0 +1,444 @@
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; TIMER CODE - this code is from Matthew Farrens' CUSP Disk
+.EQU	TIM_CNTL,$030
+.EQU	TIM_STAT,$030
+.EQU	TIM_VALUE,$031
+.EQU	TIM_COUNT,$034
+
+
+.EQU	INTERRUPT_ENA,$80
+.EQU	RESET_READY_BIT,$40
+.EQU	START_AFTER_LOAD,$10
+.EQU	ENABLE_RESET_AND_START,$D0
+.EQU	ENABLE_AND_RESET,$C0
+
+.EQU	STACKTOP,$E00
+.EQU CURSOR, $100
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+.EQU @, $000
+; INITIALIZING GAME LAYOUT
+
+
+; display level
+LDA# 0
+STA j
+levloop:	LDX j
+	LDC level_msg
+	INC j
+	ADX# 494
+	OUTB+ CURSOR
+	SBX# 494
+	CMX# lev_msglen
+	JLT levloop
+
+; display the number (FIXME)
+;LDX# 0
+;LDC level
+;LDX# 501
+;OUTB+ CURSOR
+
+
+; display lives
+LDA# 0
+STA j
+liveploop:	LDX j
+	LDC lives_msg
+	INC j
+	ADX# 509
+	OUTB+ CURSOR
+	SBX# 509
+	CMX# lives_msglen
+	JLT liveploop
+
+; display the number (FIXME)
+;LDX# 0
+;LDC lives
+;LDX# 509
+;OUTB+ CURSOR
+
+; print initializing message
+LDX# 0
+msgloop:	LDC msg
+	OUTB+ CURSOR
+	ADX# 1
+	CMX# msglen
+	JLT msgloop
+
+; quickly place down the first cars
+LDA# 0
+STA waitcount
+init_placement: NOP
+	; call time_the_cars(), which occasionally places cars based off waitcnt value
+	PSH waitcount
+	JSR time_the_cars
+	ADS# 1
+
+	INC j
+	LDA j
+	CMA# 38
+	JLT init_placement
+
+; remove initializing message
+LDX# 0
+stloop:	LDA# $20
+	OUTB+ CURSOR
+	ADX# 1
+	CMX# msglen
+	JLT stloop
+
+;LDC player
+;LDX# 370
+;OUTB+ CURSOR
+
+; FIXME: convert numlives to str & display
+;PSH level
+;PSH# num_string
+;LDA# numlen
+;STA j
+;PSH# j
+;JSR TO_STR
+;ADS# 3
+
+JMP MAIN
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; DISPLAY GAME PARAMETERS (LIVES, LEVEL)
+
+j: .WORD 1
+msg: .CHAR 'INITIALIZING GAME...', msglen
+level_msg: .CHAR 'LEVEL: ', lev_msglen
+lives_msg: .CHAR 'LIVES LEFT: ', lives_msglen
+num_string: .CHAR ' ', numlen
+printloc: .WORD 504
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; PROCEDURE DISP_STR(var str, var str_length, var location_index)
+.EQU strr, 4
+.EQU strrlen, 3
+.EQU locidx, 2
+DISP_STR:	BGN# 0
+	LDA# 0
+	STA u
+	
+disloop:	LDX u
+	LDC* ! strr
+	INC u
+	ADX* ! locidx
+	OUTB+ CURSOR
+	SBX* ! locidx
+	CMX* ! strrlen
+	;JLT disloop
+	LDA u
+	JSR $E00
+	
+dooone:	FIN# 0
+	RTN
+u: .WORD 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; TIMER CONTORL LOOP
+MAIN:	LDS#	STACKTOP
+	LDA# 1000
+	OUTW	TIM_VALUE	
+	LDA#	ENABLE_RESET_AND_START
+	OUTB	TIM_CNTL
+	SIE
+DO_WORK: 	NOP
+	NOP
+	JMP DO_WORK
+
+ISR:	PSHA
+	PSHX
+	LDA#	ENABLE_AND_RESET
+	OUTB	TIM_CNTL
+	
+	; call time_the_cars(), which occasionally places cars based off waitcnt value
+	PSH waitcount
+	JSR time_the_cars
+	ADS# 1
+
+	; reset waitcount if too large
+ISR_part2:	LDA waitcount
+	CMA# 4000
+	JLT wrapupISR
+	LDA# 0
+	STA waitcount
+
+wrapupISR:	INC waitcount
+	POPA
+	POPX
+	IRTN
+waitcount: .WORD 0	; continuously incrementing variable to help with timing of vehicle placement
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;def time_the_cars(waitcnt):
+;  bigman = 20
+;  spacing = 4
+;  for i in range(0,14):
+;    if waitcnt % ( ((i % 4) + 1) * ((bigman % CAR_SPEED_INVERSE) + 1) ) == 0:
+;      PUSHROW(i*38, i*38+38, spacing)
+;    bigman += 10
+;    spacing += 1
+.EQU waitcnt1, 2
+time_the_cars:	BGN# 0
+	LDA# 50		; set bigman, spacing, i variables
+	STA bigman
+	LDA max_spacing
+	STA spacing
+	LDA# 2		; i starts from row 3
+	STA i
+
+CARLOOP:	CLR tmp_bigman
+	LDA bigman
+	MOD CAR_SPEED_INVERSE
+	ADA# 1
+	STA tmp_bigman
+
+	LDA i		; if waitcnt % (((i%4)+1)*(bigman%6 + 1)) == 0:
+	MOD# 4
+	ADA# 1
+	MUL tmp_bigman
+	STA tmpcalc
+
+	LDA ! waitcnt1
+	MOD tmpcalc
+	CMA# 0	
+	JNE do_increments
+
+call_pushrow:	LDA i
+	MUL# 38
+	PSHA
+	ADA# 38
+	PSHA
+	PSH spacing
+	JSR PUSHROW
+	ADS# 3
+
+do_increments:	LDA bigman	;    bigman += 10
+	ADA# 5
+	STA bigman
+	DEC spacing	;    spacing -= 1
+	LDA spacing
+	CMA min_spacing
+	JNE inc_i
+
+	LDA max_spacing
+	STA spacing
+inc_i:	INC i		; i += 1
+	LDA i
+	
+	CMA# 7			; i skips row 8
+	JEQ do_increments
+	
+
+	CMA# 12		; range check for (i ends at row 12)
+	JLT CARLOOP
+
+finishup:	FIN# 0
+	RTN
+bigman: .WORD
+spacing: .WORD
+i: .WORD 3
+tmpcalc: .WORD 0
+tmp_bigman: .WORD
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; PROCEDURE print1()
+; print func for debugging
+print1:	LDA# $21
+	LDX mycounter
+	OUTB+ CURSOR
+	INC mycounter
+
+	; reset mycounter if too large
+	CMX# 531
+	JLT fin
+	LDA# 0
+	STA mycounter
+
+fin:	RTN
+mycounter: .WORD 0		; screen index to print at
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; PROCEDURE TO_STR(VALUE: INTEGER; VAR STRING: CHAR_STRING; VAR LENGTH: INTEGER)
+; this function is copied from UC Davis Professor Matthew Farrens' provided CUSP DIsk
+		.EQU	MY_VALUE,4
+		.EQU	MY_STRING,3
+		.EQU	MY_LENGTH,2
+TO_STR:		BGN#	0 
+		PSHA
+		PSHX
+		CLR*	! MY_LENGTH
+		LDA	! MY_VALUE
+LOOP1:		MOD#	10
+		PSHA 
+		INC*	! MY_LENGTH
+		LDA	! MY_VALUE
+		DIV#	10
+		STA	! MY_VALUE
+		JNE	LOOP1	
+		LDX#	0
+LOOP2:		POPA	 		
+		ADA#	$30
+		STC*	! MY_STRING
+		AOC*	! MY_LENGTH
+		JLT	LOOP2
+		POPX
+		POPA
+		FIN#	0
+		RTN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;def decrow(beg2, end2, spacing2):		# slide over all chars in row
+;  XR = 1
+;  for elem in row:
+;
+;    TODO: if row[XR-1] == playerChar:
+;             if lives > 0: loselife()
+;             else: losegame()
+;
+;    row[XR-1] = row[XR]
+;    if elem==CARchar:
+;      carlen_cnt += 1
+;      cnt = -1
+;    else: carlen_cnt = 0
+;
+;
+;    cnt += 1
+;    XR += 1
+;  if carlen_cnt < CARLEN:
+;     row[len(row)-1] = CAR
+;  elif cnt > spacing: row[len(row)-1] = CAR
+
+.EQU beg2, 4
+.EQU end2, 3
+.EQU spacing2, 2
+decrow:	BGN# 0
+	LDX ! beg2
+	ADX# 1
+	LDA# 0
+	STA cnt
+	STA carlen_cnt
+
+; START OF FOR LOOP
+myloop:	INB+ CURSOR		; row[XR-1] = row[XR]
+	OUTB+ CURSOR-1
+	CMA CARhex
+	JNE resetcarcnt
+
+	; if elem==CARchar:
+	;      carlen_cnt += 1
+	;      cnt = -1
+foundCAR:	LDA neg1
+	STA cnt
+	INC carlen_cnt
+	JMP idx_inc
+	
+	; else: carlen_cnt = 0
+resetcarcnt:	LDA# 0
+	STA carlen_cnt
+
+	; cnt += 1
+	; XR += 1
+idx_inc:	INC cnt		
+	ADX# 1			
+	CMX ! end2
+
+;	LDA carlen_cnt
+;	CMA# 1
+;	JEQ do
+;do:	JSR print1
+	
+	JLE myloop	; JMP to myloop
+; END OF FOR LOOP
+
+
+	; if carlen_cnt < CARLEN and carlen_cnt != 0:
+check_carlen:	LDA carlen_cnt
+	CMA CARLEN
+	JGT emptylast
+	CMA# 0
+	JEQ emptylast
+
+stretch_car:	PSH ! end2
+	JSR CURSOREND
+	ADS# 1
+	JMP wrapup	; RETURN
+
+	; row[len(row)-1] = ' '
+emptylast:	LDX ! end2
+	SBX# 1
+	LDA# $20
+	OUTB+ CURSOR
+	
+	; if cnt > spacing: row[len(row)-1] = CAR
+placecar:	LDA cnt
+	CMA ! spacing2
+	JLT wrapup
+
+	PSH ! end2
+	JSR CURSOREND
+	ADS# 1
+
+wrapup:	LDA cnt
+	;JSR $E00
+	FIN# 0
+	RTN
+cnt: .WORD 0
+carlen_cnt: .WORD 0
+neg1: .WORD -1
+CARLEN: .WORD 40	; supposed car length
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; CURSOREND
+; action: CURSOR[end1] = CAR
+.EQU end3, 2
+CURSOREND:	BGN# 0
+	LDX# 0
+	LDC CAR
+	LDX ! end3	; mem[FP+end1] = const value
+	SBX# 1
+	OUTB+ CURSOR
+
+	FIN# 0
+	RTN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; PROCEDURE PUSHROW(beg,end,spacing) -> push char onto row
+.EQU beg1, 4
+.EQU end1, 3
+.EQU spacing1, 2
+PUSHROW:	BGN# 0
+	; JSR print1	; print 1 (for debugging)
+	PSH ! beg1
+	PSH ! end1
+	PSH ! spacing1
+	JSR decrow	; call to decrow()
+	ADS# 3
+
+endPUSHROW:	FIN# 0
+	RTN
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; GLOBAL VARIABLES
+
+empty: .WORD $202020
+CAR: .CHAR '%', lenn
+CARhex: .WORD $000025
+
+CAR_SPEED_INVERSE: .WORD 1
+min_spacing: .WORD 7
+max_spacing: .WORD 14
+
+;level: .WORD '1', le
+;lives: .WORD '5', li
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; interrupt vector
+	.EQU	@,$FFB
+	.WORD	ISR
+
+	.END
+
+
+; def INC_level()

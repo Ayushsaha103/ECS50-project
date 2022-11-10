@@ -1,0 +1,72 @@
+
+
+; starter code for raghav's player movement part
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; added directives to include (not already on original game code)
+;.EQU KBD_CNTL, $000
+;.EQU KBD_STAT, $000
+;.EQU KBD_DATA, $001
+;.EQU CRT_CNTL, $316
+;.EQU CRT_DATA, $317
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; put player at starting location (must be called after vehicle initialization process)
+init_player:	
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; ISR routine (must be combined with original ISR routine)
+START: LDS# STACKTOP; 
+	LDA# INTERRUPT_ENA;
+	OUTB KBD_CNTL
+	SIE
+	
+; this DO_WORK loop is the same as the original one
+DO_WORK: NOP
+	NOP
+	JMP DO_WORK
+
+KBD_ISR:	PSHA
+	CIE
+	INB       KBD_DATA       ; Read the current buffered keystroke into the ACC
+	CMA# 0
+	JEQ endgame		; endgame command
+	
+	CMA# <>			; move left code
+	JEQ call_moveleft
+	CMA# <>			; move right code
+	JEQ call_moveright
+	CMA# <>
+	JEQ call_moveup
+	CMA# <>
+	JEQ call_movedown
+	
+finKBD_isr:	POPA
+	SIE
+	IRTN
+	
+	
+call_moveleft: JSR moveleft
+	JMP finKBD_isr
+call_moveright: JSR moveright
+	JMP finKBD_isr
+call_movedown: JSR movedown
+	JMP finKBD_isr
+call_moveup: JSR moveup
+	JMP finKBD_isr
+
+endgame:	HLT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; example of moveup routine
+moveup:	BGN# 0
+	; move player up
+	; check if there exists '%' at the location
+	; if so, then call decrement lives and restart game
+	
+	; check if new location is top of board
+	; if so, decrease CAR_SPEED_INVERSE, increment level, and rerun entire game
+	
+	FIN# 0
+	RTN
+	
+	
+; TODO: in the original code's decrow() function, we must add a check to see if moving vehicle reaches player locn
